@@ -1,0 +1,103 @@
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME280.h>
+#include <PubSubClient.h>
+#include <WiFi.h>
+
+// Paramètres Wi-Fi
+const char* ssid = "Votre_SSID";
+const char* password = "Votre_Mot_De_Passe";
+
+// Paramètres MQTT
+const char* mqtt_server = "adresse_du_broker_MQTT";
+const char* mqtt_topic = "sensors/co2";
+
+// Initialisation des objets capteurs
+Adafruit_BME280 bme;  // BME280 pour température et pression
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+// Variables des capteurs
+float temperature, pressure, co2Concentration, gasFlow, gasDensity;
+
+// Fonction pour se connecter au Wi-Fi
+void setup_wifi() {
+  delay(10);
+  Serial.println();
+  Serial.print("Connexion à ");
+  Serial.println(ssid);
+
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("");
+  Serial.println("WiFi connecté");
+  Serial.println(WiFi.localIP());
+}
+
+// Fonction de connexion au broker MQTT
+void reconnect() {
+  while (!client.connected()) {
+    Serial.print("Connexion au broker MQTT...");
+    if (client.connect("ESP32Client")) {
+      Serial.println("connecté");
+    } else {
+      Serial.print("échec, rc=");
+      Serial.print(client.state());
+      Serial.println(" nouvelle tentative dans 5 secondes");
+      delay(5000);
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  // Initialisation du capteur BME280
+  if (!bme.begin(0x76)) {
+    Serial.println("Erreur de connexion au BME280 !");
+    while (1);
+  }
+
+  setup_wifi();
+  client.setServer(mqtt_server, 1883);
+
+  // Configuration des broches pour le capteur de CO2 (ex : MH-Z19)
+  pinMode(34, INPUT); // Remplacer par la broche correcte pour votre capteur CO2
+}
+
+void loop() {
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+
+  // Lecture des données du BME280
+  temperature = bme.readTemperature();
+  pressure = bme.readPressure() / 100.0F;  // en hPa
+
+  // Lecture de la concentration de CO2 (exemple de lecture pour MH-Z19 via PWM ou UART)
+  co2Concentration = analogRead(34);  // Adaptation selon le capteur
+
+  // Lecture du débit de gaz (analogique, par exemple)
+  gasFlow = analogRead(35);  // Remplacer par la broche correcte
+
+  // Calcul de la densité (exemple de calcul basique)
+  gasDensity = pressure / (287.05 * (temperature + 273.15)); // Densité simplifiée de l'air
+
+  // Envoi des données au broker MQTT
+  String payload = "{\"temperature\":" + String(temperature) +
+                   ", \"pressure\":" + String(pressure) +
+                   ", \"co2Concentration\":" + String(co2Concentration) +
+                   ", \"gasFlow\":" + String(gasFlow) +
+                   ", \"gasDensity\":" + String(gasDensity) + "}";
+
+  client.publish(mqtt_topic, payload.c_str());
+  
+  Serial.println("Données envoyées : " + payload);
+
+  delay(5000);  // Attendre 5 secondes avant la prochaine lecture
+}
